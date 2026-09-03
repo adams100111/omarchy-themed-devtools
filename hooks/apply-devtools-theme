@@ -135,7 +135,17 @@ adapter_lazydocker() {
   usable lazydocker lazydocker.theme.yml || return 0
   link_owned lazydocker.theme.yml "$HOME/.config/lazydocker/config.yml"
 }
-adapter_tmux()     { usable tmux tmux.theme.conf || return 0; }
+# tmux sources the generated file from a line install.sh adds once. Reloading a
+# running server is best-effort: there may not be one.
+adapter_tmux() {
+  usable tmux tmux.theme.conf || return 0
+  if tmux has-session >/dev/null 2>&1; then
+    tmux source-file "$HOME/.config/tmux/tmux.conf" >/dev/null 2>&1 || true
+    log "  tmux: running server reloaded"
+  else
+    log "  tmux: theme regenerated (no running server)"
+  fi
+}
 
 main() {
   log "omarchy-themed-devtools: applying theme '${1:-unknown}'"

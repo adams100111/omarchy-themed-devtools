@@ -166,3 +166,13 @@ def test_fzf_adapter_leaves_generated_file_alone(fake_home):
     assert run_hook(fake_home, "eltahir", path=path).returncode == 0
     # fzf reads the file directly via FZF_DEFAULT_OPTS_FILE; commas are valid here.
     assert opts.read_text() == "--color=fg:#f3f0e7,bg:#14130d\n"
+
+
+def test_tmux_adapter_runs_and_leaves_file_intact(fake_home):
+    path = _fake_tool(fake_home, "tmux")
+    theme = fake_home / ".local/state/omarchy/current/theme"
+    conf = theme / "tmux.theme.conf"
+    conf.write_text('set -g status-style "bg=#100f0a,fg=#f3f0e7"\n')
+
+    assert run_hook(fake_home, "eltahir", path=path).returncode == 0
+    assert conf.read_text() == 'set -g status-style "bg=#100f0a,fg=#f3f0e7"\n'
