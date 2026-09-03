@@ -2,7 +2,8 @@ import os
 import subprocess
 from pathlib import Path
 
-from conftest import REPO
+from conftest import REPO, run_hook
+from test_hook import _fake_tool
 
 
 def run_script(name: str, home: Path) -> subprocess.CompletedProcess:
@@ -54,14 +55,33 @@ def _snapshot(root: Path) -> dict[str, str]:
     return out
 
 
-def test_install_uninstall_round_trip_is_clean(tmp_path):
+def test_install_uninstall_round_trip_is_clean(fake_home):
+    tmp_path = fake_home
+
     # A pre-existing user config that must come back byte-identical.
     cfg = tmp_path / ".config/starship.toml"
-    cfg.parent.mkdir(parents=True)
     cfg.write_text("original = true\n")
+
+    # install.sh never touches starship.toml -- only adapter_starship in the
+    # hook does, via link_owned. Give the hook a fake `starship` on PATH and a
+    # generated theme file so it actually symlinks and backs up the config;
+    # otherwise this test would pass even with uninstall's restore loop
+    # deleted, since the path it's meant to cover would never run.
+    path = _fake_tool(tmp_path, "starship")
+    theme = tmp_path / ".local/state/omarchy/current/theme"
+    (theme / "starship.toml").write_text('palette = "omarchy"\n')
+
     before = _snapshot(tmp_path)
 
     run_script("install.sh", tmp_path)
+    assert run_hook(tmp_path, "eltahir", path=path).returncode == 0
+
+    # Confirm the symlink-and-backup path was actually exercised before we
+    # rely on uninstall to reverse it.
+    assert cfg.is_symlink()
+    backup = tmp_path / ".config/starship.toml.pre-omarchy-theme"
+    assert backup.read_text() == "original = true\n"
+
     run_script("uninstall.sh", tmp_path)
 
     assert _snapshot(tmp_path) == before
