@@ -1306,7 +1306,7 @@ append_block() {
 }
 
 cat >"$ENV_FILE" <<EOF
-$TAG -- source this from your shell rc
+# omarchy-themed-devtools -- source this from your shell rc
 export FZF_DEFAULT_OPTS_FILE="$THEME_DIR/fzf.opts"
 export LG_CONFIG_FILE="\$HOME/.config/lazygit/config.yml,$THEME_DIR/lazygit.theme.yml"
 # eza wants ANSI codes with semicolons; Omarchy's {{ key_rgb }} renders commas.
@@ -1373,7 +1373,7 @@ Uninstall is a first-class requirement: this project symlinks over configs, copi
 - Modify: `tests/test_install.py` (append the round-trip test)
 
 **Interfaces:**
-- Consumes: `MARK_START`/`MARK_END` from Task 1; the `$TAG` convention from Task 8.
+- Consumes: `MARK_START`/`MARK_END` from Task 1, which Task 8's `append_block` writes into every user-owned file it touches. There is no `$TAG` convention — an earlier draft used a tag-plus-line-count scheme, which was replaced by marker pairs precisely because counting lines over-deleted.
 - Produces: nothing; it removes.
 
 - [ ] **Step 1: Write the failing round-trip test**
