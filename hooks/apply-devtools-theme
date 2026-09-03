@@ -66,7 +66,13 @@ adapter_starship() {
   usable starship starship.toml || return 0
   link_owned starship.toml "$HOME/.config/starship.toml"
 }
-adapter_lazygit()  { usable lazygit lazygit.theme.yml || return 0; }
+# lazygit is layered via LG_CONFIG_FILE (exported by install.sh), so the hook
+# has nothing to wire — regenerating the file is enough. lazygit reloads
+# changed config files when the terminal regains focus.
+adapter_lazygit() {
+  usable lazygit lazygit.theme.yml || return 0
+  log "  lazygit: theme regenerated (layered via LG_CONFIG_FILE)"
+}
 adapter_bat()      { usable bat Omarchy.tmTheme || return 0; }
 adapter_fzf()      { usable fzf fzf.opts || return 0; }
 adapter_herdr() {
@@ -109,7 +115,10 @@ PY
     log "  warn herdr: splice refused; config left untouched"
   fi
 }
-adapter_lazydocker() { usable lazydocker lazydocker.theme.yml || return 0; }
+adapter_lazydocker() {
+  usable lazydocker lazydocker.theme.yml || return 0
+  link_owned lazydocker.theme.yml "$HOME/.config/lazydocker/config.yml"
+}
 adapter_tmux()     { usable tmux tmux.theme.conf || return 0; }
 
 main() {

@@ -106,3 +106,28 @@ def test_starship_backup_written_once(fake_home):
     run_hook(fake_home, "eltahir", path=path)
     backup = fake_home / ".config/starship.toml.pre-omarchy-theme"
     assert backup.read_text() == "original = true\n"
+
+
+def test_lazygit_adapter_does_not_touch_user_config(fake_home):
+    path = _fake_tool(fake_home, "lazygit")
+    theme = fake_home / ".local/state/omarchy/current/theme"
+    (theme / "lazygit.theme.yml").write_text("gui:\n  theme:\n    defaultFgColor: []\n")
+
+    user_cfg = fake_home / ".config/lazygit/config.yml"
+    user_cfg.parent.mkdir(parents=True)
+    user_cfg.write_text("gui:\n  language: en\n")
+
+    assert run_hook(fake_home, "eltahir", path=path).returncode == 0
+    # Layered, not owned: the user's file is untouched and not replaced.
+    assert user_cfg.read_text() == "gui:\n  language: en\n"
+    assert not user_cfg.is_symlink()
+
+
+def test_lazydocker_adapter_owns_its_config(fake_home):
+    path = _fake_tool(fake_home, "lazydocker")
+    theme = fake_home / ".local/state/omarchy/current/theme"
+    (theme / "lazydocker.theme.yml").write_text("gui:\n  theme:\n    optionsTextColor: []\n")
+
+    assert run_hook(fake_home, "eltahir", path=path).returncode == 0
+    cfg = fake_home / ".config/lazydocker/config.yml"
+    assert cfg.is_symlink()
