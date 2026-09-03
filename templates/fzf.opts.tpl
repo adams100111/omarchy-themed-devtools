@@ -1,0 +1,5 @@
+--color=fg:{{ foreground }},bg:{{ background }},hl:{{ accent }}
+--color=fg+:{{ bright_foreground }},bg+:{{ selection }},hl+:{{ accent }}
+--color=info:{{ muted }},prompt:{{ accent }},pointer:{{ accent }}
+--color=marker:{{ green }},spinner:{{ accent }},header:{{ muted }}
+--color=border:{{ mix background foreground 20% }},gutter:{{ background }}

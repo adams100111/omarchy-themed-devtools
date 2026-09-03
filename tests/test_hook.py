@@ -131,3 +131,38 @@ def test_lazydocker_adapter_owns_its_config(fake_home):
     assert run_hook(fake_home, "eltahir", path=path).returncode == 0
     cfg = fake_home / ".config/lazydocker/config.yml"
     assert cfg.is_symlink()
+
+
+def test_bat_adapter_installs_theme_by_filename(fake_home):
+    path = _fake_tool(fake_home, "bat")
+    theme = fake_home / ".local/state/omarchy/current/theme"
+    (theme / "Omarchy.tmTheme").write_text("<plist></plist>\n")
+
+    assert run_hook(fake_home, "eltahir", path=path).returncode == 0
+    installed = fake_home / ".config/bat/themes/Omarchy.tmTheme"
+    assert installed.exists()
+    # bat derives the theme name from the filename, so it must not be renamed.
+    assert installed.name == "Omarchy.tmTheme"
+
+
+def test_eza_generated_file_is_never_mutated(fake_home):
+    """The hook must not touch eza.colors -- conversion happens in the env file."""
+    path = _fake_tool(fake_home, "eza")
+    theme = fake_home / ".local/state/omarchy/current/theme"
+    f = theme / "eza.colors"
+    original = "ur=38;2;194,161,90:di=38;2;132,155,189\n"
+    f.write_text(original)
+
+    assert run_hook(fake_home, "eltahir", path=path).returncode == 0
+    assert f.read_text() == original
+
+
+def test_fzf_adapter_leaves_generated_file_alone(fake_home):
+    path = _fake_tool(fake_home, "fzf")
+    theme = fake_home / ".local/state/omarchy/current/theme"
+    opts = theme / "fzf.opts"
+    opts.write_text("--color=fg:#f3f0e7,bg:#14130d\n")
+
+    assert run_hook(fake_home, "eltahir", path=path).returncode == 0
+    # fzf reads the file directly via FZF_DEFAULT_OPTS_FILE; commas are valid here.
+    assert opts.read_text() == "--color=fg:#f3f0e7,bg:#14130d\n"

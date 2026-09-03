@@ -73,8 +73,24 @@ adapter_lazygit() {
   usable lazygit lazygit.theme.yml || return 0
   log "  lazygit: theme regenerated (layered via LG_CONFIG_FILE)"
 }
-adapter_bat()      { usable bat Omarchy.tmTheme || return 0; }
-adapter_fzf()      { usable fzf fzf.opts || return 0; }
+adapter_bat() {
+  usable bat Omarchy.tmTheme || return 0
+
+  # bat derives the theme's NAME from the filename, so this must stay
+  # Omarchy.tmTheme; install.sh points bat's config at that name.
+  local dir="$HOME/.config/bat/themes"
+  mkdir -p "$dir"
+  cp -f "$THEME_DIR/Omarchy.tmTheme" "$dir/Omarchy.tmTheme" || return 0
+  bat cache --build >/dev/null 2>&1 || true
+  log "  bat: theme installed and cache rebuilt"
+}
+
+# fzf reads the generated file directly through FZF_DEFAULT_OPTS_FILE, which is
+# the lowest-precedence option layer, so a user's own FZF_DEFAULT_OPTS still wins.
+adapter_fzf() {
+  usable fzf fzf.opts || return 0
+  log "  fzf: opts regenerated (layered via FZF_DEFAULT_OPTS_FILE)"
+}
 adapter_herdr() {
   usable herdr herdr.theme.toml || return 0
 
