@@ -344,11 +344,20 @@ def fake_home(tmp_path) -> Path:
 
 
 def run_hook(home: Path, *args: str, path: str = "") -> subprocess.CompletedProcess:
-    """Invoke the hook exactly as omarchy-hook does: bash <hook> <slug>."""
+    """Invoke the hook the way omarchy-hook does: through the INSTALLED symlink.
+
+    Invoking the repo copy directly would hide any bug in how the hook locates
+    files relative to itself — which is exactly the shape the real install has.
+    """
+    hookdir = home / ".config/omarchy/hooks/theme-set.d"
+    hookdir.mkdir(parents=True, exist_ok=True)
+    link = hookdir / "apply-devtools-theme"
+    if not link.exists():
+        link.symlink_to(REPO / "hooks/apply-devtools-theme")
+
     env = dict(os.environ, HOME=str(home), PATH=path)
     return subprocess.run(
-        ["bash", str(REPO / "hooks/apply-devtools-theme"), *args],
-        capture_output=True, text=True, env=env,
+        ["bash", str(link), *args], capture_output=True, text=True, env=env,
     )
 ```
 
@@ -427,14 +436,15 @@ adapter_starship() { usable starship starship.toml || return 0; }
 adapter_lazygit()  { usable lazygit lazygit.theme.yml || return 0; }
 adapter_bat()      { usable bat Omarchy.tmTheme || return 0; }
 adapter_fzf()      { usable fzf fzf.opts || return 0; }
-adapter_eza()      { usable eza eza.colors || return 0; }
 adapter_herdr()    { usable herdr herdr.theme.toml || return 0; }
 adapter_lazydocker() { usable lazydocker lazydocker.theme.yml || return 0; }
 adapter_tmux()     { usable tmux tmux.theme.conf || return 0; }
 
 main() {
   log "omarchy-themed-devtools: applying theme '${1:-unknown}'"
-  for adapter in starship lazygit bat fzf eza herdr lazydocker tmux; do
+  # eza has no adapter: its value is converted where it is consumed,
+  # in the env file install.sh writes. See README.
+  for adapter in starship lazygit bat fzf herdr lazydocker tmux; do
     "adapter_$adapter" || log "  warn $adapter: adapter returned non-zero"
   done
   return 0
@@ -629,8 +639,12 @@ PY
 Add near the top of the hook, after `THEME_DIR`:
 
 ```bash
-# Where lib/herdr_patch.py lives; install.sh rewrites this line.
-DEVTOOLS_LIB="${DEVTOOLS_LIB:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib" 2>/dev/null && pwd)}"
+# The hook is SYMLINKED into ~/.config/omarchy/hooks/theme-set.d/, so
+# ${BASH_SOURCE[0]} is the link, not the file. Resolve it before deriving the
+# repo path -- otherwise lib/ is looked for next to the link and never found,
+# and the herdr adapter silently does nothing once installed.
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+DEVTOOLS_LIB="${DEVTOOLS_LIB:-$(cd "$(dirname "$SELF")/../lib" 2>/dev/null && pwd)}"
 export DEVTOOLS_LIB
 ```
 
@@ -918,11 +932,11 @@ on terminal focus. lazydocker has no equivalent and is owned via link_owned."
 
 ---
 
-### Task 6: bat, fzf and eza adapters
+### Task 6: bat and fzf adapters
 
-Three small adapters with one sharp edge: eza takes ANSI escape codes, not hex. Omarchy's `{{ key_rgb }}` expands to comma-separated `R,G,B` but eza needs `38;2;R;G;B`, so this one generated file gets a comma-to-semicolon pass. It is the only post-processing in the project and must not be applied to any other file.
+Two small adapters. bat derives a theme's *name from its filename*, so the generated file must be `Omarchy.tmTheme` and never renamed.
 
-bat derives a theme's *name from its filename*, so the generated file must be `Omarchy.tmTheme` and never renamed.
+**eza gets a template but no adapter.** It takes ANSI escape codes rather than hex — truecolor is `38;2;R;G;B` — while Omarchy's `{{ key_rgb }}` expands with commas. Rather than have the hook rewrite the generated file (which would mutate Omarchy's state directory, and would race a shell that starts before the hook first runs), the conversion happens where the value is consumed: `install.sh` writes `export EZA_COLORS="$(tr ',' ';' < …)"`. No adapter, no post-processing step, no race.
 
 **Files:**
 - Create: `templates/Omarchy.tmTheme.tpl`, `templates/fzf.opts.tpl`, `templates/eza.colors.tpl`
@@ -1010,27 +1024,16 @@ def test_bat_adapter_installs_theme_by_filename(fake_home):
     assert installed.name == "Omarchy.tmTheme"
 
 
-def test_eza_commas_become_semicolons(fake_home):
-    path = _fake_tool(fake_home, "eza")
-    theme = fake_home / ".local/state/omarchy/current/theme"
-    (theme / "eza.colors").write_text("ur=38;2;194,161,90:di=38;2;132,155,189\n")
-
-    assert run_hook(fake_home, "eltahir", path=path).returncode == 0
-    out = (theme / "eza.colors").read_text()
-    assert "," not in out
-    assert "ur=38;2;194;161;90" in out
-    assert "di=38;2;132;155;189" in out
-
-
-def test_eza_conversion_is_idempotent(fake_home):
+def test_eza_generated_file_is_never_mutated(fake_home):
+    """The hook must not touch eza.colors -- conversion happens in the env file."""
     path = _fake_tool(fake_home, "eza")
     theme = fake_home / ".local/state/omarchy/current/theme"
     f = theme / "eza.colors"
-    f.write_text("ur=38;2;194,161,90\n")
-    run_hook(fake_home, "eltahir", path=path)
-    once = f.read_text()
-    run_hook(fake_home, "eltahir", path=path)
-    assert f.read_text() == once
+    original = "ur=38;2;194,161,90:di=38;2;132,155,189\n"
+    f.write_text(original)
+
+    assert run_hook(fake_home, "eltahir", path=path).returncode == 0
+    assert f.read_text() == original
 
 
 def test_fzf_adapter_leaves_generated_file_alone(fake_home):
@@ -1047,7 +1050,7 @@ def test_fzf_adapter_leaves_generated_file_alone(fake_home):
 - [ ] **Step 3: Run tests to verify they fail**
 
 Run: `uvx pytest tests/test_hook.py -k "bat or eza or fzf" -v`
-Expected: FAIL — bat theme not installed; eza file still contains commas
+Expected: FAIL — bat theme not installed
 
 - [ ] **Step 4: Implement the adapters**
 
@@ -1073,17 +1076,6 @@ adapter_fzf() {
   log "  fzf: opts regenerated (layered via FZF_DEFAULT_OPTS_FILE)"
 }
 
-# eza takes ANSI escape codes, not hex: truecolor is 38;2;R;G;B. Omarchy's
-# {{ key_rgb }} expands to "R,G,B", so this one file needs commas turned into
-# semicolons. Confined to eza.colors -- commas are legitimate everywhere else.
-adapter_eza() {
-  usable eza eza.colors || return 0
-  local f="$THEME_DIR/eza.colors"
-  if grep -q ',' "$f"; then
-    sed -i 's/,/;/g' "$f" || return 0
-    log "  eza: rgb separators normalised"
-  fi
-}
 ```
 
 - [ ] **Step 5: Run tests to verify they pass**
@@ -1095,14 +1087,16 @@ Expected: all passed
 
 ```bash
 git add templates/Omarchy.tmTheme.tpl templates/fzf.opts.tpl templates/eza.colors.tpl hooks/ tests/
-git commit -m "feat: bat, fzf and eza adapters
+git commit -m "feat: bat and fzf adapters, eza template
 
 bat derives a theme's name from its filename, so the generated file is
 Omarchy.tmTheme and the cache is rebuilt after every write.
 
-eza takes ANSI escape codes rather than hex -- truecolor is 38;2;R;G;B -- but
-Omarchy's {{ key_rgb }} expands with commas, so eza.colors alone gets a
-comma-to-semicolon pass. Without it the template renders silently uncoloured."
+eza needs ANSI escape codes rather than hex, and Omarchy's {{ key_rgb }}
+expands with commas, but the conversion belongs where the value is consumed
+rather than in the hook: rewriting the generated file would mutate Omarchy's
+state directory and would race a shell started before the hook first ran.
+install.sh does it with tr when exporting EZA_COLORS."
 ```
 
 ---
@@ -1275,7 +1269,13 @@ THEMED="$HOME/.config/omarchy/themed"
 HOOKS="$HOME/.config/omarchy/hooks/theme-set.d"
 THEME_DIR="$HOME/.local/state/omarchy/current/theme"
 ENV_FILE="$HOME/.config/omarchy/themed-devtools.env"
-TAG="# omarchy-themed-devtools"
+
+# One removal mechanism for the whole project: everything this script adds to a
+# user-owned file is wrapped in these markers, and uninstall deletes between
+# them. Counting lines instead would over-delete whenever an addition is not
+# exactly the length the remover assumed.
+MARK_START="# >>> omarchy-theme >>>"
+MARK_END="# <<< omarchy-theme <<<"
 
 mkdir -p "$THEMED" "$HOOKS" "$(dirname "$ENV_FILE")"
 
@@ -1287,33 +1287,39 @@ done
 ln -sfn "$REPO/hooks/apply-devtools-theme" "$HOOKS/apply-devtools-theme"
 echo "  linked hook"
 
-# append_once <file> <line> -- add a line exactly once, tagged so uninstall can
-# find it again. Creates the file if absent.
-append_once() {
-  local file="$1" line="$2"
+# append_block <file> <body> -- add a marker-wrapped block exactly once.
+# Creates the file if absent. Idempotent: a file already carrying our start
+# marker is left alone, so re-running install never duplicates anything.
+append_block() {
+  local file="$1" body="$2"
   mkdir -p "$(dirname "$file")"
   touch "$file"
-  grep -qF "$line" "$file" || printf '%s %s\n%s\n' "$TAG" "" "$line" >>"$file"
+  grep -qF "$MARK_START" "$file" && return 0
+  printf '%s\n%s\n%s\n' "$MARK_START" "$body" "$MARK_END" >>"$file"
 }
 
 cat >"$ENV_FILE" <<EOF
 $TAG -- source this from your shell rc
 export FZF_DEFAULT_OPTS_FILE="$THEME_DIR/fzf.opts"
 export LG_CONFIG_FILE="\$HOME/.config/lazygit/config.yml,$THEME_DIR/lazygit.theme.yml"
-[ -r "$THEME_DIR/eza.colors" ] && export EZA_COLORS="\$(cat "$THEME_DIR/eza.colors")"
+# eza wants ANSI codes with semicolons; Omarchy's {{ key_rgb }} renders commas.
+# Converting here rather than in the hook keeps Omarchy's state dir read-only
+# and means a shell opened before the first theme change still gets it right.
+[ -r "$THEME_DIR/eza.colors" ] && export EZA_COLORS="\$(tr ',' ';' < "$THEME_DIR/eza.colors")"
+true
 EOF
 echo "  wrote $ENV_FILE"
 
 command -v delta >/dev/null 2>&1 &&
-  append_once "$HOME/.config/git/config" "[include]
+  append_block "$HOME/.config/git/config" "[include]
 	path = $THEME_DIR/delta.gitconfig"
 
 command -v tmux >/dev/null 2>&1 &&
-  append_once "$HOME/.config/tmux/tmux.conf" "source-file -q $THEME_DIR/tmux.theme.conf"
+  append_block "$HOME/.config/tmux/tmux.conf" "source-file -q $THEME_DIR/tmux.theme.conf"
 
 # bat selects a theme by NAME, which it derives from the theme filename.
 command -v bat >/dev/null 2>&1 &&
-  append_once "$HOME/.config/bat/config" '--theme="Omarchy"'
+  append_block "$HOME/.config/bat/config" '--theme="Omarchy"'
 
 cat <<EOF
 
@@ -1393,6 +1399,29 @@ def test_install_uninstall_round_trip_is_clean(tmp_path):
     assert not cfg.is_symlink()
 
 
+def test_uninstall_never_eats_a_user_line(tmp_path):
+    """Regression: a one-line addition followed immediately by a user line.
+
+    An earlier remover deleted a fixed two lines after a tag and destroyed
+    `set -g mouse on`. Markers make the addition's length irrelevant.
+    """
+    conf = tmp_path / ".config/tmux/tmux.conf"
+    conf.parent.mkdir(parents=True)
+    conf.write_text(
+        "# >>> omarchy-theme >>>\n"
+        "source-file -q /theme/tmux.theme.conf\n"
+        "# <<< omarchy-theme <<<\n"
+        "set -g mouse on\n"
+        "set -g prefix C-Space\n")
+
+    run_script("uninstall.sh", tmp_path)
+    out = conf.read_text()
+    assert "omarchy-theme" not in out
+    assert "source-file" not in out
+    assert "set -g mouse on" in out
+    assert "set -g prefix C-Space" in out
+
+
 def test_uninstall_removes_herdr_managed_block(tmp_path):
     cfg = tmp_path / ".config/herdr/config.toml"
     cfg.parent.mkdir(parents=True)
@@ -1425,7 +1454,13 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 THEMED="$HOME/.config/omarchy/themed"
 HOOKS="$HOME/.config/omarchy/hooks/theme-set.d"
 ENV_FILE="$HOME/.config/omarchy/themed-devtools.env"
-TAG="# omarchy-themed-devtools"
+
+# One removal mechanism for the whole project: everything this script adds to a
+# user-owned file is wrapped in these markers, and uninstall deletes between
+# them. Counting lines instead would over-delete whenever an addition is not
+# exactly the length the remover assumed.
+MARK_START="# >>> omarchy-theme >>>"
+MARK_END="# <<< omarchy-theme <<<"
 
 for tpl in "$REPO"/templates/*.tpl; do
   rm -f "$THEMED/$(basename "$tpl")"
@@ -1447,33 +1482,31 @@ done
 rm -f "$HOME/.config/bat/themes/Omarchy.tmTheme"
 command -v bat >/dev/null 2>&1 && bat cache --build >/dev/null 2>&1 || true
 
-# Drop the tagged line and the tag comment above it.
-strip_tagged() {
-  local file="$1"
+# strip_block <file> [--remove-if-empty]
+#
+# Delete everything between our markers, leaving every other byte alone. This is
+# the ONLY removal mechanism in the project -- it works for a one-line addition
+# and a ten-line one alike. An earlier draft counted a fixed number of lines
+# after a tag and deleted a user's `set -g mouse on` along with our own.
+strip_block() {
+  local file="$1" remove_if_empty="${2:-}"
   [[ -f $file ]] || return 0
-  awk -v tag="$TAG" '
-    index($0, tag) == 1 { skip = 2; next }
-    skip > 0 { skip--; next }
-    { print }
-  ' "$file" >"$file.tmp" && mv "$file.tmp" "$file"
-  # Remove the file if we emptied it.
-  [[ -s $file ]] || rm -f "$file"
-}
-
-strip_tagged "$HOME/.config/git/config"
-strip_tagged "$HOME/.config/tmux/tmux.conf"
-strip_tagged "$HOME/.config/bat/config"
-
-# Remove herdr's managed block, leaving every other byte alone.
-HERDR_CFG="$HOME/.config/herdr/config.toml"
-if [[ -f $HERDR_CFG ]]; then
   awk '
     /^[[:space:]]*# >>> omarchy-theme >>>[[:space:]]*$/ { inblock = 1; next }
     /^[[:space:]]*# <<< omarchy-theme <<<[[:space:]]*$/ { inblock = 0; next }
     !inblock { print }
-  ' "$HERDR_CFG" >"$HERDR_CFG.tmp" && mv "$HERDR_CFG.tmp" "$HERDR_CFG"
-  echo "  removed managed block from herdr config"
-fi
+  ' "$file" >"$file.tmp" && mv "$file.tmp" "$file"
+  # Only files this project may have created are removed when emptied; never a
+  # config the user owns outright.
+  [[ $remove_if_empty == "--remove-if-empty" && ! -s $file ]] && rm -f "$file"
+  return 0
+}
+
+strip_block "$HOME/.config/git/config"
+strip_block "$HOME/.config/tmux/tmux.conf"
+strip_block "$HOME/.config/bat/config" --remove-if-empty
+strip_block "$HOME/.config/herdr/config.toml"
+echo "  removed managed blocks"
 
 rmdir "$THEMED" "$HOOKS" 2>/dev/null || true
 
@@ -1501,7 +1534,181 @@ install then uninstall leaves the tree byte-identical."
 
 ---
 
-### Task 10: README and live end-to-end verification
+### Task 10: Template rendering validation
+
+Templates are where most of the project's surface area lives, and nothing so far
+parses their output. A typo, an unbalanced quote, or a `{{ token }}` that no
+palette defines would ship silently. The unresolved-token check matters most: it
+is the exact failure mode when a template references a key Omarchy cannot
+resolve.
+
+**Files:**
+- Create: `tests/test_templates.py`
+- Modify: `pyproject.toml` (pyyaml for the YAML templates)
+
+**Interfaces:**
+- Consumes: `templates/*.tpl`.
+- Produces: nothing; it validates.
+
+- [ ] **Step 1: Add the YAML dependency**
+
+Replace `pyproject.toml`:
+
+```toml
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+```
+
+Tests that need YAML are run with `uvx --with pyyaml pytest`.
+
+- [ ] **Step 2: Write the failing test**
+
+`tests/test_templates.py`:
+
+```python
+"""Render every template against a known palette and parse the result.
+
+Mirrors what omarchy-theme-set-templates does: substitute {{ key }},
+{{ key_strip }}, {{ key_rgb }} and {{ mix a b N% }}.
+"""
+import plistlib
+import re
+import tomllib
+
+import pytest
+import yaml
+
+from conftest import REPO
+
+PALETTE = {
+    "background": "#14130d", "dark_background": "#100f0a",
+    "darker_background": "#0c0b07", "lighter_background": "#1c1b14",
+    "foreground": "#f3f0e7", "bright_foreground": "#f8f7f2",
+    "light_foreground": "#b4ae9f", "dark_foreground": "#76705f",
+    "muted": "#76705f", "accent": "#c2a15a", "selection": "#2e2716",
+    "red": "#cf6f56", "green": "#94a55e", "yellow": "#c2a15a",
+    "blue": "#849bbd", "magenta": "#ba859f", "cyan": "#74a69b",
+    "orange": "#d28d4d", "brown": "#9c7d52", "bright_red": "#e58e75",
+    "theme_type": "dark",
+}
+
+
+def _mix(a: str, b: str, pct: float) -> str:
+    ca, cb = a.lstrip("#"), b.lstrip("#")
+    parts = []
+    for i in (0, 2, 4):
+        x, y = int(ca[i:i + 2], 16), int(cb[i:i + 2], 16)
+        parts.append(f"{round(x + (y - x) * pct):02x}")
+    return "#" + "".join(parts)
+
+
+def render(text: str) -> str:
+    def mix_sub(m):
+        a, b, amount = m.group(1), m.group(2), m.group(3)
+        return _mix(PALETTE[a], PALETTE[b], float(amount.rstrip("%")) / 100)
+
+    text = re.sub(r"\{\{\s*mix\s+(\w+)\s+(\w+)\s+([\d.]+%)\s*\}\}", mix_sub, text)
+    for key, value in PALETTE.items():
+        text = text.replace(f"{{{{ {key} }}}}", value)
+        text = text.replace(f"{{{{ {key}_strip }}}}", value.lstrip("#"))
+        rgb = ",".join(str(int(value.lstrip("#")[i:i + 2], 16)) for i in (0, 2, 4))
+        text = text.replace(f"{{{{ {key}_rgb }}}}", rgb)
+    return text
+
+
+def _render_template(name: str) -> str:
+    return render((REPO / "templates" / name).read_text())
+
+
+ALL = [p.name for p in (REPO / "templates").glob("*.tpl")]
+
+
+@pytest.mark.parametrize("name", ALL)
+def test_no_unresolved_tokens(name):
+    """A leftover {{ }} means the template references a key no palette defines."""
+    out = _render_template(name)
+    leftovers = re.findall(r"\{\{[^}]*\}\}", out)
+    assert not leftovers, f"{name} left {leftovers} unresolved"
+
+
+@pytest.mark.parametrize("name", ["herdr.theme.toml.tpl", "starship.toml.tpl"])
+def test_toml_templates_parse(name):
+    tomllib.loads(_render_template(name))
+
+
+@pytest.mark.parametrize("name", ["lazygit.theme.yml.tpl", "lazydocker.theme.yml.tpl"])
+def test_yaml_templates_parse(name):
+    data = yaml.safe_load(_render_template(name))
+    assert "gui" in data and "theme" in data["gui"]
+
+
+def test_tmtheme_parses_as_plist():
+    data = plistlib.loads(_render_template("Omarchy.tmTheme.tpl").encode())
+    # bat matches the theme by filename, but the name key should agree.
+    assert data["name"] == "Omarchy"
+    assert data["settings"][0]["settings"]["background"] == PALETTE["background"]
+
+
+def test_fzf_opts_are_well_formed():
+    for line in _render_template("fzf.opts.tpl").splitlines():
+        if not line.strip():
+            continue
+        assert line.startswith("--color="), line
+        for pair in line[len("--color="):].split(","):
+            assert re.fullmatch(r"[\w+-]+:#[0-9a-fA-F]{6}", pair), pair
+
+
+def test_eza_colors_use_ansi_triplets():
+    out = _render_template("eza.colors.tpl").strip()
+    assert "#" not in out, "eza takes ANSI codes, never hex"
+    for pair in out.split(":"):
+        key, _, value = pair.partition("=")
+        assert key and value.startswith("38;2;"), pair
+        # Commas here are expected; install.sh converts them when exporting.
+        assert re.fullmatch(r"38;2;\d{1,3},\d{1,3},\d{1,3}", value), pair
+
+
+def test_herdr_template_covers_every_custom_token():
+    data = tomllib.loads(_render_template("herdr.theme.toml.tpl"))
+    expected = {
+        "accent", "panel_bg", "sidebar_bg", "active_row_bg", "selection_bg",
+        "surface0", "surface1", "surface_dim", "overlay0", "overlay1",
+        "text", "subtext0", "mauve", "green", "yellow", "red", "blue",
+        "teal", "peach",
+    }
+    assert set(data["theme"]["custom"]) == expected
+```
+
+- [ ] **Step 3: Run tests to verify they fail**
+
+Run: `uvx --with pyyaml pytest tests/test_templates.py -v`
+Expected: FAIL — collection error until every template from Tasks 3-7 exists
+
+- [ ] **Step 4: Fix whatever the parsers reject**
+
+No new implementation: this task validates work already done. Correct any template the parsers reject, then re-run. Typical findings are an unquoted hex in YAML, a `{{ token }}` whose key is absent from `PALETTE`, or an unescaped `&`/`<` in the plist.
+
+- [ ] **Step 5: Run tests to verify they pass**
+
+Run: `uvx --with pyyaml pytest -v`
+Expected: all passed
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add tests/test_templates.py
+git commit -m "test: render and parse every template
+
+Templates carry most of the project's surface area and nothing parsed their
+output, so a typo or a token no palette defines would have shipped silently.
+Each rendered template is now parsed with the right parser -- tomllib, yaml,
+plistlib -- and every template is checked for leftover {{ }} tokens."
+```
+
+---
+
+### Task 11: README and live end-to-end verification
 
 The final gate: prove the whole thing works against two real themes, not just in tmpdirs.
 
@@ -1669,3 +1876,31 @@ match the awk patterns in Task 9.
 rather than existing ones. Same for `fzf`, whose file is re-read per invocation
 and so updates immediately. This asymmetry is inherent to env-var wiring and is
 documented in the README rather than worked around.
+
+## Review round 2 (2026-09-03)
+
+Three defects were found by grilling this plan and are fixed above. Recorded so
+they are not reintroduced.
+
+1. **`DEVTOOLS_LIB` was dead once installed.** It derived the repo path from
+   `${BASH_SOURCE[0]}`, which is the *symlink* omarchy invokes, so `lib/` was
+   looked for beside the link and never found — the herdr adapter would have
+   done nothing in production. Worse, every hook test called the repo copy
+   directly, so the suite could not have caught it. Fixed with `readlink -f`,
+   and `run_hook` now invokes the installed symlink so the whole class of bug is
+   closed rather than this one instance.
+2. **`uninstall.sh` deleted user lines.** It skipped a fixed two lines after a
+   tag, but only the git `[include]` addition is two lines. Verified to destroy
+   `set -g mouse on` from a tmux.conf. Replaced with one marker-based remover
+   used for every file, herdr included, plus a regression test.
+3. **The eza adapter mutated Omarchy's state directory** and raced a shell
+   started before the first theme change. Removed entirely; the conversion now
+   happens in `install.sh` where the value is consumed.
+
+One prediction was **wrong** and is recorded to save the next reader the
+detour: `set -e` does *not* abort `install.sh` when `command -v <tool>` fails in
+an `&&` chain — bash exempts AND-lists. Verified empirically.
+
+A fourth risk was **cleared**: `{{ orange }}` and `{{ brown }}` are absent from
+some themes' `colors.toml` (Solitude, for one), but `omarchy-theme-color --all`
+resolves them via fallbacks, so templates referencing them are safe everywhere.
