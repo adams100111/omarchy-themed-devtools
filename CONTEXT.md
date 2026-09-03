@@ -46,9 +46,14 @@ that reads it. Every adapter is independent and individually skippable: if the
 tool is not installed, its adapter is a no-op.
 
 An adapter is **layered** when the tool can read theme colors alongside the
-user's own config (`fzf` via `FZF_DEFAULT_OPTS_FILE`, `delta` via git
-`[include]`, `tmux` via `source-file`), and **owning** when the template
-produces the tool's whole config file (`starship`, `lazygit`).
+user's own config (`fzf` via `FZF_DEFAULT_OPTS_FILE`, `tmux` via `source-file`),
+and **owning** when the template produces the tool's whole config file
+(`starship`, `lazydocker`).
+
+Not every template has an adapter. `eza` is themed by a template whose output
+`install.sh` converts once when exporting `EZA_COLORS`; nothing needs to run on
+a theme change, so it has no adapter at all. A template without an adapter is
+the preferred shape wherever the tool re-reads its input on its own.
 
 ## Managed block
 

@@ -112,10 +112,10 @@ Every row verified against the tool's own documentation (context7) or its binary
 | `lazygit` | `lazygit.theme.yml` | layered | `LG_CONFIG_FILE` list, theme file last | on terminal focus |
 | `bat` | `Omarchy.tmTheme` | owning | copy to `~/.config/bat/themes/` | `bat cache --build` |
 | `fzf` | `fzf.opts` | layered | `FZF_DEFAULT_OPTS_FILE` | next invocation |
-| `eza` | `eza.colors` | layered | `EZA_COLORS` | next invocation |
+| `eza` | `eza.colors` | **template only — no adapter** | `EZA_COLORS`, converted by `install.sh` | next shell |
 | `lazydocker` | `lazydocker.theme.yml` | owning | symlink | next launch |
 | `tmux` | `tmux.theme.conf` | layered | `source-file` line | `tmux source-file` |
-| `delta` | `delta.gitconfig` | layered | `[include]` in `~/.config/git/config` | immediate |
+| ~~`delta`~~ | `delta.gitconfig` | *v1.1, not built* | `[include]` in `~/.config/git/config` | immediate |
 
 `delta` is **v1.1**: it is in the user's dev-boost `cli` profile but is not
 installed on this machine (neither `delta` nor `git-delta`), so its adapter
@@ -180,8 +180,11 @@ Settled 2026-09-03 after verification. Recorded so they are not silently revisit
 4. **`uninstall.sh` is a first-class requirement**, not a nicety, and is covered
    by a test asserting install→uninstall returns the machine to a byte-identical
    state.
-5. **Scope.** Eight adapters in v1; `delta` in v1.1 (not installed, so not
-   end-to-end testable).
+5. **Scope: eight templates, seven adapters, one deferred.** eza gets a
+   template but **no adapter** — its conversion happens in `install.sh` where the
+   value is consumed, so the hook never touches it (see decision 3). `delta` is
+   deferred to v1.1: it is declared in the dev-boost `cli` profile but is not
+   installed on this machine, so its adapter cannot be tested end to end.
 6. **Public, MIT.** The project is theme-agnostic and carries no personal data —
    no palette, no signature, no identity — so it is publishable and is the
    natural precursor to an upstream Omarchy PR.
