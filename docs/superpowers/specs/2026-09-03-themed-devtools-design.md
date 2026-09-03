@@ -93,7 +93,7 @@ omarchy-themed-devtools/
 ├── templates/*.tpl         one per tool — pure colour, no logic
 ├── hooks/apply-devtools-theme     the single theme-set.d hook
 ├── lib/herdr_patch.py      managed-block splice (the only delicate code)
-└── tests/                  bats for the hook, pytest for the splice
+└── tests/                  pytest throughout (see decision 7)
 ```
 
 The hook is a sequence of independent **adapters**. Each is guarded by
@@ -153,9 +153,12 @@ override.
 **eza** takes `EZA_COLORS` as colon-separated `code=ansi` pairs using **ANSI
 escape codes**, not hex — truecolor is `38;2;R;G;B`. Omarchy's `{{ key_rgb }}`
 expands to comma-separated `R,G,B`, so the template cannot emit this directly.
-The hook converts commas to semicolons in this one generated file after
-rendering. This is the only post-processing step in the project and must be
-confined to `eza.colors`.
+The comma-to-semicolon conversion happens **in `install.sh`**, in the shell
+snippet it writes for `EZA_COLORS`, not in the hook — see decision 5: eza gets
+a template but no adapter. Converting where the value is consumed keeps
+Omarchy's state directory read-only and means a shell opened before the first
+theme change already gets the right value. This is the only post-processing
+step in the project and must be confined to `eza.colors`.
 
 ## Decisions
 
@@ -179,7 +182,11 @@ Settled 2026-09-03 after verification. Recorded so they are not silently revisit
    fast and cannot append duplicates.
 4. **`uninstall.sh` is a first-class requirement**, not a nicety, and is covered
    by a test asserting install→uninstall returns the machine to a byte-identical
-   state.
+   state, with one accepted exception: herdr's `[ui] accent`. `splice()`
+   overwrites that key in place with no record of its prior value, so nothing
+   can restore it. Documented in the README; not a bug to be fixed. Two
+   non-content residues are also accepted: directories left empty after their
+   files are removed, and bat's rebuilt cache (a derived artifact).
 5. **Scope: eight templates, seven adapters, one deferred.** eza gets a
    template but **no adapter** — its conversion happens in `install.sh` where the
    value is consumed, so the hook never touches it (see decision 3). `delta` is
@@ -203,6 +210,15 @@ Settled 2026-09-03 after verification. Recorded so they are not silently revisit
 - Splice cannot find or safely parse its target → **refuse, leave file
   untouched, warn**. Never a partial write.
 - Owning adapter finds an unrecognised existing config → refuse and warn.
+  Concretely: a destination that is already a symlink pointing anywhere other
+  than the generated theme file is unrecognised (a dotfiles manager owns it).
+  It is never replaced, because doing so would leave no backup and no record of
+  its target. The warning is not verbose-gated.
+- `uninstall.sh` removes a symlink only when it can prove ownership — the link
+  points into the theme dir, or a `*.pre-omarchy-theme` backup sits beside it.
+- Every block removal writes **through** a symlink (the resolved target is
+  edited), never renames a temp file over it, so a dotfiles-managed config
+  stays a symlink and its source keeps the edit.
 - The hook always exits 0. A theme change must never fail because a dev tool
   could not be themed.
 
@@ -218,7 +234,9 @@ Settled 2026-09-03 after verification. Recorded so they are not silently revisit
 6. Comments and blank lines outside the block → preserved exactly.
 7. Malformed/truncated markers → refuses, file unchanged, non-zero from the lib.
 
-The hook gets bats coverage for adapter skipping and the exit-0 guarantee.
+The hook gets pytest coverage (via `subprocess`, per decision 7) for adapter
+skipping, the exit-0 guarantee, the refusal to replace an unrecognised config,
+and the install/uninstall round trip.
 
 Verification for the whole project is a real theme switch: apply Eltahir, then
 Catppuccin, and confirm each tool's colours follow both ways.

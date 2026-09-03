@@ -28,12 +28,22 @@ config from. Nothing in Omarchy is patched or forked.
 generated one, and any real file already there is backed up once to
 `<file>.pre-omarchy-theme`:
 `~/.config/starship.toml`, `~/.config/lazydocker/config.yml`.
+If one of these paths is **already a symlink** pointing somewhere other than
+the generated theme — the normal shape under chezmoi, stow or any other
+dotfiles manager — the adapter **refuses and warns** instead. Replacing it
+would leave no backup and no record of where it pointed, so uninstall could
+not put it back. Move or unlink it yourself if you want this project to own it.
 
 **Layered** — the user's own config is left alone; the tool is pointed at the
 generated file alongside it via an environment variable or an appended
 `source-file` line:
 `lazygit` (`LG_CONFIG_FILE`), `fzf` (`FZF_DEFAULT_OPTS_FILE`), `eza`
 (`EZA_COLORS`), `tmux` (`source-file` in `tmux.conf`).
+tmux has two config paths and reads only one: once `~/.config/tmux/tmux.conf`
+exists it ignores `~/.tmux.conf` completely. `install.sh` therefore appends to
+whichever file tmux is actually reading — the XDG path if it exists, otherwise
+a pre-existing `~/.tmux.conf` — and creates the XDG one only when you have
+neither, saying so in its output.
 
 **Spliced** — the tool mixes theme settings with other settings in one file
 and offers no include mechanism, so only a marker-delimited block is rewritten
@@ -66,10 +76,14 @@ been exercised end to end. It is not supported in v1.
 
 ## Herdr's accent does not round-trip
 
-Every other file this project touches restores exactly — symlinks and their
-`*.pre-omarchy-theme` backups, the marker blocks in `git/config`,
-`tmux.conf`, and `bat/config`, the bat theme file, the env file. `herdr` is
-the one exception.
+Every other file this project touches restores to its original contents —
+symlinks and their `*.pre-omarchy-theme` backups, the marker blocks in
+`git/config`, `tmux.conf`, and `bat/config`, the bat theme file, the env file.
+`herdr` is the one exception. (Two things that are not file *contents* do
+remain: directories created along the way — `~/.config/bat/themes`,
+`~/.config/tmux` — are left in place when they end up empty, and `bat`'s
+rebuilt cache under `$XDG_CACHE_HOME/bat` is a derived artifact, not
+configuration.)
 
 herdr keeps a single `accent` key under `[ui]`, outside the block this
 project manages, and the theme's accent color is applied there so herdr's UI
@@ -111,7 +125,14 @@ Restores every `*.pre-omarchy-theme` backup, strips the marker-delimited
 blocks it added to `git/config`, `tmux.conf`, `bat/config`, and
 `herdr/config.toml`, removes the symlinked templates and hook, and deletes
 the env file. See "Herdr's accent does not round-trip" above for the one
-value it cannot restore. Safe to run when nothing is installed.
+value it cannot restore.
+
+It only removes a symlink it can prove is its own — one that points into
+`~/.local/state/omarchy/current/theme`, or one sitting next to a
+`*.pre-omarchy-theme` backup it wrote. A dotfiles symlink pointing anywhere
+else is reported and left alone. Blocks are stripped *through* a symlink, so a
+config managed by chezmoi or stow stays a symlink and the file it points at is
+edited in place. Safe to run when nothing is installed.
 
 ## Headless and offline theme changes
 
