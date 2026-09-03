@@ -40,6 +40,15 @@ and offers no include mechanism, so only a marker-delimited block is rewritten
 and everything else — including keybindings — is left byte-for-byte alone:
 `~/.config/herdr/config.toml`.
 
+**Copied and pointed at** — neither Owned nor Layered: the generated theme is
+copied into the tool's own themes directory (not symlinked), and a
+marker-wrapped line is added to its config so the tool selects that theme by
+name:
+`bat` — the theme file goes to `~/.config/bat/themes/Omarchy.tmTheme`, and
+`--theme="Omarchy"` is appended, marker-wrapped and therefore removable by
+`uninstall.sh`, to `~/.config/bat/config`. Every theme change also runs
+`bat cache --build` so bat picks up the new file.
+
 Eight templates ship, but only seven have a hook adapter. `eza` has a
 template with no adapter: its output uses comma-separated ANSI codes, but
 `EZA_COLORS` needs semicolons, and that conversion happens once in
