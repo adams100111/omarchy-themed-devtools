@@ -328,10 +328,17 @@ Append to `tests/conftest.py`:
 
 ```python
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
+# Resolved once. The fixtures below hand the child an EMPTY PATH so the hook's
+# own `command -v` checks find no tools — but an empty PATH also stops Python
+# from resolving the bare name "bash", so the interpreter must be an absolute
+# path. (An *unset* PATH falls back to a default search path; an empty one does
+# not.) Passing "bash" here fails with FileNotFoundError on every system.
+BASH = shutil.which("bash") or "/bin/bash"
 
 
 @pytest.fixture
@@ -357,7 +364,7 @@ def run_hook(home: Path, *args: str, path: str = "") -> subprocess.CompletedProc
 
     env = dict(os.environ, HOME=str(home), PATH=path)
     return subprocess.run(
-        ["bash", str(link), *args], capture_output=True, text=True, env=env,
+        [BASH, str(link), *args], capture_output=True, text=True, env=env,
     )
 ```
 
