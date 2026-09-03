@@ -9,6 +9,15 @@
 # change must never fail because a dev tool could not be themed.
 
 THEME_DIR="$HOME/.local/state/omarchy/current/theme"
+
+# The hook is SYMLINKED into ~/.config/omarchy/hooks/theme-set.d/, so
+# ${BASH_SOURCE[0]} is the link, not the file. Resolve it before deriving the
+# repo path -- otherwise lib/ is looked for next to the link and never found,
+# and the herdr adapter silently does nothing once installed.
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+DEVTOOLS_LIB="${DEVTOOLS_LIB:-$(cd "$(dirname "$SELF")/../lib" 2>/dev/null && pwd)}"
+export DEVTOOLS_LIB
+
 VERBOSE=0
 
 for arg in "$@"; do
@@ -37,7 +46,46 @@ adapter_starship() { usable starship starship.toml || return 0; }
 adapter_lazygit()  { usable lazygit lazygit.theme.yml || return 0; }
 adapter_bat()      { usable bat Omarchy.tmTheme || return 0; }
 adapter_fzf()      { usable fzf fzf.opts || return 0; }
-adapter_herdr()    { usable herdr herdr.theme.toml || return 0; }
+adapter_herdr() {
+  usable herdr herdr.theme.toml || return 0
+
+  local cfg="$HOME/.config/herdr/config.toml"
+  if [[ ! -f $cfg ]]; then
+    log "  skip herdr: no config.toml"
+    return 0
+  fi
+
+  # The accent herdr uses for [ui] is the same signal colour as the theme's.
+  local accent
+  accent=$(sed -n 's/^accent[[:space:]]*=[[:space:]]*"\(.*\)"/\1/p' \
+    "$THEME_DIR/herdr.theme.toml" | head -1)
+  [[ -n $accent ]] || accent="#000000"
+
+  # The splice refuses rather than half-writing, so a failure leaves the
+  # user's config untouched. Write via a temp file for the same reason.
+  local tmp
+  tmp=$(mktemp) || return 0
+  if python3 - "$cfg" "$THEME_DIR/herdr.theme.toml" "$accent" >"$tmp" <<'PY'
+import sys
+sys.path.insert(0, __import__("os").environ["DEVTOOLS_LIB"])
+from herdr_patch import splice
+
+cfg, block, accent = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(cfg, encoding="utf-8") as f:
+    text = f.read()
+with open(block, encoding="utf-8") as f:
+    theme = f.read()
+sys.stdout.write(splice(text, theme, accent))
+PY
+  then
+    mv "$tmp" "$cfg"
+    log "  herdr: spliced"
+    herdr server reload-config >/dev/null 2>&1 || true
+  else
+    rm -f "$tmp"
+    log "  warn herdr: splice refused; config left untouched"
+  fi
+}
 adapter_lazydocker() { usable lazydocker lazydocker.theme.yml || return 0; }
 adapter_tmux()     { usable tmux tmux.theme.conf || return 0; }
 
