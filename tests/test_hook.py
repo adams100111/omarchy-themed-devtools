@@ -78,3 +78,31 @@ def test_herdr_adapter_skips_when_no_config(fake_home):
     theme = fake_home / ".local/state/omarchy/current/theme"
     (theme / "herdr.theme.toml").write_text('[theme]\nname = "terminal"\n')
     assert run_hook(fake_home, "eltahir", path=path).returncode == 0
+
+
+def test_starship_adapter_symlinks_and_backs_up(fake_home):
+    path = _fake_tool(fake_home, "starship")
+    theme = fake_home / ".local/state/omarchy/current/theme"
+    (theme / "starship.toml").write_text('palette = "omarchy"\n')
+
+    cfg = fake_home / ".config/starship.toml"
+    cfg.write_text("original = true\n")
+
+    assert run_hook(fake_home, "eltahir", path=path).returncode == 0
+    assert cfg.is_symlink()
+    assert cfg.resolve() == (theme / "starship.toml").resolve()
+    backup = fake_home / ".config/starship.toml.pre-omarchy-theme"
+    assert backup.read_text() == "original = true\n"
+
+
+def test_starship_backup_written_once(fake_home):
+    path = _fake_tool(fake_home, "starship")
+    theme = fake_home / ".local/state/omarchy/current/theme"
+    (theme / "starship.toml").write_text('palette = "omarchy"\n')
+    cfg = fake_home / ".config/starship.toml"
+    cfg.write_text("original = true\n")
+
+    run_hook(fake_home, "eltahir", path=path)
+    run_hook(fake_home, "eltahir", path=path)
+    backup = fake_home / ".config/starship.toml.pre-omarchy-theme"
+    assert backup.read_text() == "original = true\n"

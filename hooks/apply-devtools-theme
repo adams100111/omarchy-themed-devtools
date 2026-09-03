@@ -42,7 +42,30 @@ usable() {
   return 0
 }
 
-adapter_starship() { usable starship starship.toml || return 0; }
+# link_owned <generated-file> <destination>
+#
+# Replace a whole config file with a symlink to the generated one. Any real
+# file already there is copied to <destination>.pre-omarchy-theme first. That
+# backup is written once and never overwritten, so re-running is safe and the
+# user's original is always recoverable.
+link_owned() {
+  local src="$THEME_DIR/$1" dest="$2" backup="$2.pre-omarchy-theme"
+
+  if [[ -e $dest && ! -L $dest ]]; then
+    if [[ ! -e $backup ]] && ! cp -p "$dest" "$backup"; then
+      log "  warn $(basename "$dest"): could not back up; leaving it alone"
+      return 0
+    fi
+  fi
+  mkdir -p "$(dirname "$dest")"
+  ln -sfn "$src" "$dest"
+  log "  $(basename "$dest"): linked"
+}
+
+adapter_starship() {
+  usable starship starship.toml || return 0
+  link_owned starship.toml "$HOME/.config/starship.toml"
+}
 adapter_lazygit()  { usable lazygit lazygit.theme.yml || return 0; }
 adapter_bat()      { usable bat Omarchy.tmTheme || return 0; }
 adapter_fzf()      { usable fzf fzf.opts || return 0; }
