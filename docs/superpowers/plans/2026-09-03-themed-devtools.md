@@ -1618,9 +1618,14 @@ def render(text: str) -> str:
     text = re.sub(r"\{\{\s*mix\s+(\w+)\s+(\w+)\s+([\d.]+%)\s*\}\}", mix_sub, text)
     for key, value in PALETTE.items():
         text = text.replace(f"{{{{ {key} }}}}", value)
-        text = text.replace(f"{{{{ {key}_strip }}}}", value.lstrip("#"))
-        rgb = ",".join(str(int(value.lstrip("#")[i:i + 2], 16)) for i in (0, 2, 4))
-        text = text.replace(f"{{{{ {key}_rgb }}}}", rgb)
+        # Only colours have _strip/_rgb variants. PALETTE also carries
+        # non-colour keys such as theme_type="dark"; slicing those as hex
+        # raises ValueError and would fail every template before any real
+        # validation ran.
+        if value.startswith("#"):
+            text = text.replace(f"{{{{ {key}_strip }}}}", value.lstrip("#"))
+            rgb = ",".join(str(int(value.lstrip("#")[i:i + 2], 16)) for i in (0, 2, 4))
+            text = text.replace(f"{{{{ {key}_rgb }}}}", rgb)
     return text
 
 
