@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# Wire Omarchy's generated theme files into dev tools that Omarchy does not
+# theme itself. Installed into ~/.config/omarchy/hooks/theme-set.d/.
+#
+# omarchy-hook runs this as: bash <hook> <theme-slug>
+#
+# Every adapter is independent and guarded: a missing tool or a missing
+# generated file skips that adapter only. The hook always exits 0 — a theme
+# change must never fail because a dev tool could not be themed.
+
+THEME_DIR="$HOME/.local/state/omarchy/current/theme"
+VERBOSE=0
+
+for arg in "$@"; do
+  case "$arg" in
+    --verbose) VERBOSE=1 ;;
+    --sync) ;;   # accepted; the hook does the same work either way
+  esac
+done
+
+log() { [[ $VERBOSE == 1 ]] && echo "$*"; return 0; }
+
+# Usable <tool> <generated-file> — true when both the tool and its input exist.
+usable() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    log "  skip $1: not installed"
+    return 1
+  fi
+  if [[ ! -f "$THEME_DIR/$2" ]]; then
+    log "  skip $1: $2 not generated"
+    return 1
+  fi
+  return 0
+}
+
+adapter_starship() { usable starship starship.toml || return 0; }
+adapter_lazygit()  { usable lazygit lazygit.theme.yml || return 0; }
+adapter_bat()      { usable bat Omarchy.tmTheme || return 0; }
+adapter_fzf()      { usable fzf fzf.opts || return 0; }
+adapter_herdr()    { usable herdr herdr.theme.toml || return 0; }
+adapter_lazydocker() { usable lazydocker lazydocker.theme.yml || return 0; }
+adapter_tmux()     { usable tmux tmux.theme.conf || return 0; }
+
+main() {
+  log "omarchy-themed-devtools: applying theme '${1:-unknown}'"
+  # eza has no adapter: its value is converted where it is consumed,
+  # in the env file install.sh writes. See README.
+  for adapter in starship lazygit bat fzf herdr lazydocker tmux; do
+    "adapter_$adapter" || log "  warn $adapter: adapter returned non-zero"
+  done
+  return 0
+}
+
+main "$@"
+exit 0
