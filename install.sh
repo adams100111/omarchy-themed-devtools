@@ -54,8 +54,25 @@ command -v delta >/dev/null 2>&1 &&
   append_block "$HOME/.config/git/config" "[include]
 	path = $THEME_DIR/delta.gitconfig"
 
-command -v tmux >/dev/null 2>&1 &&
-  append_block "$HOME/.config/tmux/tmux.conf" "source-file -q $THEME_DIR/tmux.theme.conf"
+# tmux reads ~/.config/tmux/tmux.conf in preference to ~/.tmux.conf and, when
+# both exist, IGNORES the legacy path entirely (verified on tmux 3.7c). Creating
+# the XDG file for a user who has ~/.tmux.conf would silently take away their
+# prefix, keybindings and plugins, so append to whichever file tmux is actually
+# reading. Only when neither exists do we create one -- and we say so below.
+TMUX_CONF="$HOME/.config/tmux/tmux.conf"
+if command -v tmux >/dev/null 2>&1; then
+  if [[ ! -e $TMUX_CONF && -e $HOME/.tmux.conf ]]; then
+    TMUX_CONF="$HOME/.tmux.conf"
+  fi
+  tmux_created=no
+  [[ -e $TMUX_CONF ]] || tmux_created=yes
+  append_block "$TMUX_CONF" "source-file -q $THEME_DIR/tmux.theme.conf"
+  if [[ $tmux_created == yes ]]; then
+    echo "  created $TMUX_CONF (you had no tmux config)"
+  else
+    echo "  wired tmux via $TMUX_CONF"
+  fi
+fi
 
 # bat selects a theme by NAME, which it derives from the theme filename.
 command -v bat >/dev/null 2>&1 &&

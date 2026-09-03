@@ -176,3 +176,79 @@ def test_tmux_adapter_runs_and_leaves_file_intact(fake_home):
 
     assert run_hook(fake_home, "eltahir", path=path).returncode == 0
     assert conf.read_text() == 'set -g status-style "bg=#100f0a,fg=#f3f0e7"\n'
+
+
+def test_starship_adapter_refuses_a_foreign_symlink(fake_home):
+    """An owning adapter must refuse an unrecognised config, per the spec.
+
+    A symlink into a dotfiles repo is the chezmoi-managed case. `ln -sfn` over
+    it leaves no backup and no record of where it pointed, so uninstall could
+    never put it back -- the user's file would simply be gone.
+    """
+    dotfiles = fake_home / "dotfiles"
+    dotfiles.mkdir()
+    source = dotfiles / "starship.toml"
+    source.write_text("mine = true\n")
+
+    dest = fake_home / ".config/starship.toml"
+    dest.symlink_to(source)
+
+    path = _fake_tool(fake_home, "starship")
+    theme = fake_home / ".local/state/omarchy/current/theme"
+    (theme / "starship.toml").write_text('palette = "omarchy"\n')
+
+    result = run_hook(fake_home, "eltahir", path=path)
+    assert result.returncode == 0                     # hook always exits 0
+    assert dest.resolve() == source.resolve()         # link untouched
+    assert source.read_text() == "mine = true\n"
+    assert not (fake_home / ".config/starship.toml.pre-omarchy-theme").exists()
+    assert "refusing" in result.stderr                # ...and it says so
+
+
+def test_link_owned_relinks_its_own_symlink(fake_home):
+    """The refusal must not break the normal re-run: our own link is replaced."""
+    path = _fake_tool(fake_home, "starship")
+    theme = fake_home / ".local/state/omarchy/current/theme"
+    (theme / "starship.toml").write_text('palette = "omarchy"\n')
+
+    dest = fake_home / ".config/starship.toml"
+    assert run_hook(fake_home, "eltahir", path=path).returncode == 0
+    assert dest.is_symlink()
+    result = run_hook(fake_home, "eltahir", path=path)
+    assert result.returncode == 0
+    assert dest.resolve() == (theme / "starship.toml").resolve()
+    assert "refusing" not in result.stderr
+
+
+def test_herdr_adapter_writes_through_a_symlink(fake_home):
+    """A dotfiles-managed config.toml must stay a symlink, target edited.
+
+    Renaming the spliced temp file over the link would orphan the dotfiles
+    source: the repo copy would keep the pre-splice content forever while a
+    detached regular file took over.
+    """
+    dotfiles = fake_home / "dotfiles"
+    dotfiles.mkdir()
+    source = dotfiles / "herdr.toml"
+    source.write_text('onboarding = false\n\n[keys]\nprefix = "ctrl+space"\n\n'
+                      '[ui]\naccent = "blue"\n')
+    source.chmod(0o644)
+
+    cfg_dir = fake_home / ".config/herdr"
+    cfg_dir.mkdir(parents=True)
+    cfg = cfg_dir / "config.toml"
+    cfg.symlink_to(source)
+
+    path = _fake_tool(fake_home, "herdr")
+    theme = fake_home / ".local/state/omarchy/current/theme"
+    (theme / "herdr.theme.toml").write_text(
+        '[theme]\nname = "terminal"\n\n[theme.custom]\naccent = "#c2a15a"\n')
+
+    assert run_hook(fake_home, "eltahir", path=path).returncode == 0
+    assert cfg.is_symlink(), "the dotfiles link must survive the splice"
+    assert cfg.resolve() == source.resolve()
+    body = source.read_text()
+    assert 'prefix = "ctrl+space"' in body
+    assert 'accent = "#c2a15a"' in body
+    # mktemp creates 0600; the rename must not tighten the user's permissions.
+    assert source.stat().st_mode & 0o777 == 0o644

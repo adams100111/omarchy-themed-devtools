@@ -29,6 +29,10 @@ done
 
 log() { [[ $VERBOSE == 1 ]] && echo "$*"; return 0; }
 
+# Unlike log(), warn() is never verbose-gated: refusing to touch a config the
+# user owns has to be visible on a normal theme change.
+warn() { echo "omarchy-themed-devtools: warning: $*" >&2; return 0; }
+
 # Usable <tool> <generated-file> — true when both the tool and its input exist.
 usable() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -48,12 +52,25 @@ usable() {
 # file already there is copied to <destination>.pre-omarchy-theme first. That
 # backup is written once and never overwritten, so re-running is safe and the
 # user's original is always recoverable.
+#
+# A destination that is ALREADY a symlink pointing somewhere other than the
+# theme dir is an unrecognised config -- a dotfiles manager (chezmoi, stow)
+# owns it. Per the spec, an owning adapter refuses and warns rather than
+# replacing it: `ln -sfn` over it would leave no backup and no trace of where
+# it pointed, and uninstall could not put it back.
 link_owned() {
   local src="$THEME_DIR/$1" dest="$2" backup="$2.pre-omarchy-theme"
 
-  if [[ -e $dest && ! -L $dest ]]; then
+  if [[ -L $dest ]]; then
+    local current
+    current="$(readlink "$dest")"
+    if [[ $current != "$THEME_DIR"/* ]]; then
+      warn "$(basename "$dest") is a symlink to $current (not ours); refusing to replace it"
+      return 0
+    fi
+  elif [[ -e $dest ]]; then
     if [[ ! -e $backup ]] && ! cp -p "$dest" "$backup"; then
-      log "  warn $(basename "$dest"): could not back up; leaving it alone"
+      warn "$(basename "$dest"): could not back up; leaving it alone"
       return 0
     fi
   fi
@@ -106,10 +123,18 @@ adapter_herdr() {
     "$THEME_DIR/herdr.theme.toml" | head -1)
   [[ -n $accent ]] || accent="#000000"
 
+  # Write THROUGH a symlink, never over it: a dotfiles-managed config.toml
+  # must stay a symlink, with the file it points at edited in place. Renaming
+  # over the link would orphan the dotfiles source and leave a detached copy.
+  local real
+  real="$(readlink -f "$cfg")" || real="$cfg"
+
   # The splice refuses rather than half-writing, so a failure leaves the
-  # user's config untouched. Write via a temp file for the same reason.
+  # user's config untouched. Write via a temp file for the same reason -- in
+  # the target's OWN directory, so the final mv is a same-filesystem rename
+  # (atomic) rather than a copy+unlink.
   local tmp
-  tmp=$(mktemp) || return 0
+  tmp=$(mktemp -p "$(dirname "$real")") || return 0
   if python3 - "$cfg" "$THEME_DIR/herdr.theme.toml" "$accent" >"$tmp" <<'PY'
 import sys
 sys.path.insert(0, __import__("os").environ["DEVTOOLS_LIB"])
@@ -123,7 +148,10 @@ with open(block, encoding="utf-8") as f:
 sys.stdout.write(splice(text, theme, accent))
 PY
   then
-    mv "$tmp" "$cfg"
+    # mktemp makes the temp file 0600; a plain rename would silently tighten
+    # the user's config permissions, so copy the original's mode across first.
+    chmod --reference="$real" "$tmp" 2>/dev/null || true
+    mv -f "$tmp" "$real"
     log "  herdr: spliced"
     herdr server reload-config >/dev/null 2>&1 || true
   else
@@ -139,8 +167,12 @@ adapter_lazydocker() {
 # running server is best-effort: there may not be one.
 adapter_tmux() {
   usable tmux tmux.theme.conf || return 0
+  # install.sh appends its source-file line to whichever config tmux actually
+  # reads -- the XDG path if present, otherwise a pre-existing ~/.tmux.conf.
+  local conf="$HOME/.config/tmux/tmux.conf"
+  [[ -e $conf ]] || conf="$HOME/.tmux.conf"
   if tmux has-session >/dev/null 2>&1; then
-    tmux source-file "$HOME/.config/tmux/tmux.conf" >/dev/null 2>&1 || true
+    tmux source-file "$conf" >/dev/null 2>&1 || true
     log "  tmux: running server reloaded"
   else
     log "  tmux: theme regenerated (no running server)"

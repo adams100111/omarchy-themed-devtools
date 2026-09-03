@@ -76,7 +76,26 @@ def run_hook(home: Path, *args: str, path: str = "") -> subprocess.CompletedProc
     if not link.exists():
         link.symlink_to(REPO / "hooks/apply-devtools-theme")
 
-    env = dict(os.environ, HOME=str(home), PATH=path)
     return subprocess.run(
-        [BASH, str(link), *args], capture_output=True, text=True, env=env,
+        [BASH, str(link), *args], capture_output=True, text=True,
+        env=child_env(home, path=path),
     )
+
+
+def child_env(home: Path, path: str | None = None) -> dict[str, str]:
+    """The environment every script/hook under test runs in.
+
+    XDG_CACHE_HOME and XDG_CONFIG_HOME are PINNED inside the temporary HOME
+    rather than inherited. Without that the suite is only hermetic by accident:
+    tools invoked by the scripts (`bat cache --build`) follow whatever the
+    developer's shell exports, so the same test passes here and fails under
+    `env -u XDG_CACHE_HOME -u XDG_CONFIG_HOME`. Pinning also guarantees nothing
+    under test can write into the real user's cache or config.
+    """
+    env = dict(os.environ,
+               HOME=str(home),
+               XDG_CACHE_HOME=str(home / ".cache"),
+               XDG_CONFIG_HOME=str(home / ".config"))
+    if path is not None:
+        env["PATH"] = path
+    return env
