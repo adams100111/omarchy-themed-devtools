@@ -1,0 +1,193 @@
+#!/usr/bin/env bash
+# Wire Omarchy's generated theme files into dev tools that Omarchy does not
+# theme itself. Installed into ~/.config/omarchy/hooks/theme-set.d/.
+#
+# omarchy-hook runs this as: bash <hook> <theme-slug>
+#
+# Every adapter is independent and guarded: a missing tool or a missing
+# generated file skips that adapter only. The hook always exits 0 — a theme
+# change must never fail because a dev tool could not be themed.
+
+THEME_DIR="$HOME/.local/state/omarchy/current/theme"
+
+# The hook is SYMLINKED into ~/.config/omarchy/hooks/theme-set.d/, so
+# ${BASH_SOURCE[0]} is the link, not the file. Resolve it before deriving the
+# repo path -- otherwise lib/ is looked for next to the link and never found,
+# and the herdr adapter silently does nothing once installed.
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+DEVTOOLS_LIB="${DEVTOOLS_LIB:-$(cd "$(dirname "$SELF")/../lib" 2>/dev/null && pwd)}"
+export DEVTOOLS_LIB
+
+VERBOSE=0
+
+for arg in "$@"; do
+  case "$arg" in
+    --verbose) VERBOSE=1 ;;
+    --sync) ;;   # accepted; the hook does the same work either way
+  esac
+done
+
+log() { [[ $VERBOSE == 1 ]] && echo "$*"; return 0; }
+
+# Unlike log(), warn() is never verbose-gated: refusing to touch a config the
+# user owns has to be visible on a normal theme change.
+warn() { echo "omarchy-themed-devtools: warning: $*" >&2; return 0; }
+
+# Usable <tool> <generated-file> — true when both the tool and its input exist.
+usable() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    log "  skip $1: not installed"
+    return 1
+  fi
+  if [[ ! -f "$THEME_DIR/$2" ]]; then
+    log "  skip $1: $2 not generated"
+    return 1
+  fi
+  return 0
+}
+
+# link_owned <generated-file> <destination>
+#
+# Replace a whole config file with a symlink to the generated one. Any real
+# file already there is copied to <destination>.pre-omarchy-theme first. That
+# backup is written once and never overwritten, so re-running is safe and the
+# user's original is always recoverable.
+#
+# A destination that is ALREADY a symlink pointing somewhere other than the
+# theme dir is an unrecognised config -- a dotfiles manager (chezmoi, stow)
+# owns it. Per the spec, an owning adapter refuses and warns rather than
+# replacing it: `ln -sfn` over it would leave no backup and no trace of where
+# it pointed, and uninstall could not put it back.
+link_owned() {
+  local src="$THEME_DIR/$1" dest="$2" backup="$2.pre-omarchy-theme"
+
+  if [[ -L $dest ]]; then
+    local current
+    current="$(readlink "$dest")"
+    if [[ $current != "$THEME_DIR"/* ]]; then
+      warn "$(basename "$dest") is a symlink to $current (not ours); refusing to replace it"
+      return 0
+    fi
+  elif [[ -e $dest ]]; then
+    if [[ ! -e $backup ]] && ! cp -p "$dest" "$backup"; then
+      warn "$(basename "$dest"): could not back up; leaving it alone"
+      return 0
+    fi
+  fi
+  mkdir -p "$(dirname "$dest")"
+  ln -sfn "$src" "$dest"
+  log "  $(basename "$dest"): linked"
+}
+
+adapter_starship() {
+  usable starship starship.toml || return 0
+  link_owned starship.toml "$HOME/.config/starship.toml"
+}
+# lazygit is layered via LG_CONFIG_FILE (exported by install.sh), so the hook
+# has nothing to wire — regenerating the file is enough. lazygit reloads
+# changed config files when the terminal regains focus.
+adapter_lazygit() {
+  usable lazygit lazygit.theme.yml || return 0
+  log "  lazygit: theme regenerated (layered via LG_CONFIG_FILE)"
+}
+adapter_bat() {
+  usable bat Omarchy.tmTheme || return 0
+
+  # bat derives the theme's NAME from the filename, so this must stay
+  # Omarchy.tmTheme; install.sh points bat's config at that name.
+  local dir="$HOME/.config/bat/themes"
+  mkdir -p "$dir"
+  cp -f "$THEME_DIR/Omarchy.tmTheme" "$dir/Omarchy.tmTheme" || return 0
+  bat cache --build >/dev/null 2>&1 || true
+  log "  bat: theme installed and cache rebuilt"
+}
+
+# fzf reads the generated file directly through FZF_DEFAULT_OPTS_FILE, which is
+# the lowest-precedence option layer, so a user's own FZF_DEFAULT_OPTS still wins.
+adapter_fzf() {
+  usable fzf fzf.opts || return 0
+  log "  fzf: opts regenerated (layered via FZF_DEFAULT_OPTS_FILE)"
+}
+adapter_herdr() {
+  usable herdr herdr.theme.toml || return 0
+
+  local cfg="$HOME/.config/herdr/config.toml"
+  if [[ ! -f $cfg ]]; then
+    log "  skip herdr: no config.toml"
+    return 0
+  fi
+
+  # The accent herdr uses for [ui] is the same signal colour as the theme's.
+  local accent
+  accent=$(sed -n 's/^accent[[:space:]]*=[[:space:]]*"\(.*\)"/\1/p' \
+    "$THEME_DIR/herdr.theme.toml" | head -1)
+  [[ -n $accent ]] || accent="#000000"
+
+  # Write THROUGH a symlink, never over it: a dotfiles-managed config.toml
+  # must stay a symlink, with the file it points at edited in place. Renaming
+  # over the link would orphan the dotfiles source and leave a detached copy.
+  local real
+  real="$(readlink -f "$cfg")" || real="$cfg"
+
+  # The splice refuses rather than half-writing, so a failure leaves the
+  # user's config untouched. Write via a temp file for the same reason -- in
+  # the target's OWN directory, so the final mv is a same-filesystem rename
+  # (atomic) rather than a copy+unlink.
+  local tmp
+  tmp=$(mktemp -p "$(dirname "$real")") || return 0
+  if python3 - "$cfg" "$THEME_DIR/herdr.theme.toml" "$accent" >"$tmp" <<'PY'
+import sys
+sys.path.insert(0, __import__("os").environ["DEVTOOLS_LIB"])
+from herdr_patch import splice
+
+cfg, block, accent = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(cfg, encoding="utf-8") as f:
+    text = f.read()
+with open(block, encoding="utf-8") as f:
+    theme = f.read()
+sys.stdout.write(splice(text, theme, accent))
+PY
+  then
+    # mktemp makes the temp file 0600; a plain rename would silently tighten
+    # the user's config permissions, so copy the original's mode across first.
+    chmod --reference="$real" "$tmp" 2>/dev/null || true
+    mv -f "$tmp" "$real"
+    log "  herdr: spliced"
+    herdr server reload-config >/dev/null 2>&1 || true
+  else
+    rm -f "$tmp"
+    log "  warn herdr: splice refused; config left untouched"
+  fi
+}
+adapter_lazydocker() {
+  usable lazydocker lazydocker.theme.yml || return 0
+  link_owned lazydocker.theme.yml "$HOME/.config/lazydocker/config.yml"
+}
+# tmux sources the generated file from a line install.sh adds once. Reloading a
+# running server is best-effort: there may not be one.
+adapter_tmux() {
+  usable tmux tmux.theme.conf || return 0
+  # install.sh appends its source-file line to whichever config tmux actually
+  # reads -- the XDG path if present, otherwise a pre-existing ~/.tmux.conf.
+  local conf="$HOME/.config/tmux/tmux.conf"
+  [[ -e $conf ]] || conf="$HOME/.tmux.conf"
+  if tmux has-session >/dev/null 2>&1; then
+    tmux source-file "$conf" >/dev/null 2>&1 || true
+    log "  tmux: running server reloaded"
+  else
+    log "  tmux: theme regenerated (no running server)"
+  fi
+}
+
+main() {
+  log "omarchy-themed-devtools: applying theme '${1:-unknown}'"
+  # eza has no adapter: its value is converted where it is consumed,
+  # in the env file install.sh writes. See README.
+  for adapter in starship lazygit bat fzf herdr lazydocker tmux; do
+    "adapter_$adapter" || log "  warn $adapter: adapter returned non-zero"
+  done
+  return 0
+}
+
+main "$@"
+exit 0

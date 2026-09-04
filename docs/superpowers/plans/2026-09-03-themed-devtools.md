@@ -328,10 +328,17 @@ Append to `tests/conftest.py`:
 
 ```python
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
+# Resolved once. The fixtures below hand the child an EMPTY PATH so the hook's
+# own `command -v` checks find no tools — but an empty PATH also stops Python
+# from resolving the bare name "bash", so the interpreter must be an absolute
+# path. (An *unset* PATH falls back to a default search path; an empty one does
+# not.) Passing "bash" here fails with FileNotFoundError on every system.
+BASH = shutil.which("bash") or "/bin/bash"
 
 
 @pytest.fixture
@@ -357,7 +364,7 @@ def run_hook(home: Path, *args: str, path: str = "") -> subprocess.CompletedProc
 
     env = dict(os.environ, HOME=str(home), PATH=path)
     return subprocess.run(
-        ["bash", str(link), *args], capture_output=True, text=True, env=env,
+        [BASH, str(link), *args], capture_output=True, text=True, env=env,
     )
 ```
 
@@ -716,10 +723,10 @@ style      = "signal"
 ahead      = "⇡${count} "
 diverged   = "⇕⇡${ahead_count}⇣${behind_count} "
 behind     = "⇣${count} "
-conflicted = " "
-up_to_date = " "
+conflicted = " "
+up_to_date = " "
 untracked  = "? "
-modified   = " "
+modified   = " "
 stashed    = ""
 staged     = ""
 renamed    = ""
@@ -1299,7 +1306,7 @@ append_block() {
 }
 
 cat >"$ENV_FILE" <<EOF
-$TAG -- source this from your shell rc
+# omarchy-themed-devtools -- source this from your shell rc
 export FZF_DEFAULT_OPTS_FILE="$THEME_DIR/fzf.opts"
 export LG_CONFIG_FILE="\$HOME/.config/lazygit/config.yml,$THEME_DIR/lazygit.theme.yml"
 # eza wants ANSI codes with semicolons; Omarchy's {{ key_rgb }} renders commas.
@@ -1366,7 +1373,7 @@ Uninstall is a first-class requirement: this project symlinks over configs, copi
 - Modify: `tests/test_install.py` (append the round-trip test)
 
 **Interfaces:**
-- Consumes: `MARK_START`/`MARK_END` from Task 1; the `$TAG` convention from Task 8.
+- Consumes: `MARK_START`/`MARK_END` from Task 1, which Task 8's `append_block` writes into every user-owned file it touches. There is no `$TAG` convention — an earlier draft used a tag-plus-line-count scheme, which was replaced by marker pairs precisely because counting lines over-deleted.
 - Produces: nothing; it removes.
 
 - [ ] **Step 1: Write the failing round-trip test**
@@ -1611,9 +1618,14 @@ def render(text: str) -> str:
     text = re.sub(r"\{\{\s*mix\s+(\w+)\s+(\w+)\s+([\d.]+%)\s*\}\}", mix_sub, text)
     for key, value in PALETTE.items():
         text = text.replace(f"{{{{ {key} }}}}", value)
-        text = text.replace(f"{{{{ {key}_strip }}}}", value.lstrip("#"))
-        rgb = ",".join(str(int(value.lstrip("#")[i:i + 2], 16)) for i in (0, 2, 4))
-        text = text.replace(f"{{{{ {key}_rgb }}}}", rgb)
+        # Only colours have _strip/_rgb variants. PALETTE also carries
+        # non-colour keys such as theme_type="dark"; slicing those as hex
+        # raises ValueError and would fail every template before any real
+        # validation ran.
+        if value.startswith("#"):
+            text = text.replace(f"{{{{ {key}_strip }}}}", value.lstrip("#"))
+            rgb = ",".join(str(int(value.lstrip("#")[i:i + 2], 16)) for i in (0, 2, 4))
+            text = text.replace(f"{{{{ {key}_rgb }}}}", rgb)
     return text
 
 
