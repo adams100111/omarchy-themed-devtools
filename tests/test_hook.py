@@ -1,4 +1,4 @@
-from conftest import run_hook
+from conftest import run_hook, ui_accent
 
 
 def test_exits_zero_with_no_tools_installed(fake_home):
@@ -52,8 +52,8 @@ def test_herdr_adapter_splices_config(fake_home):
     assert run_hook(fake_home, "eltahir", path=path).returncode == 0
     out = cfg.read_text()
     assert 'prefix = "ctrl+space"' in out          # keybindings survive
-    assert 'accent = "blue"' not in out            # ui accent replaced
-    assert 'accent = "#c2a15a"' in out
+    assert ui_accent(out) == '"#c2a15a"'           # [ui] accent replaced
+    assert "# omarchy-theme:prior-ui-accent = \"blue\"" in out  # prior recorded
     assert "mouse_capture = true" in out
 
 

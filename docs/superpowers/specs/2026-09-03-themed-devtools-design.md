@@ -182,7 +182,7 @@ Settled 2026-09-03 after verification. Recorded so they are not silently revisit
    fast and cannot append duplicates.
 4. **`uninstall.sh` is a first-class requirement**, not a nicety, and is covered
    by a test asserting install→uninstall returns the machine to a byte-identical
-   state, with one accepted exception: herdr's `[ui] accent`. `splice()`
+   state, with one accepted exception: herdr's `[ui] accent` (resolved — see below). `splice()`
    overwrites that key in place with no record of its prior value, so nothing
    can restore it. Documented in the README; not a bug to be fixed. Two
    non-content residues are also accepted: directories left empty after their
@@ -250,3 +250,18 @@ silently editing a login shell's rc is a bad trade for two exports.
 
 `install.sh` writes the exports to `~/.config/omarchy/themed-devtools.env` and
 prints the single `source` line to add.
+
+
+## Addendum — the herdr accent round-trip is resolved (2026-09-04)
+
+The design originally accepted that herdr's `[ui] accent` could not round-trip:
+`splice()` replaced that key in place, outside the managed block, with no record
+of the prior value, so uninstall had nothing to restore.
+
+That is fixed. `splice()` now writes `# omarchy-theme:prior-ui-accent = <value>`
+inside the managed block and `uninstall.sh` reads it back before stripping the
+block. The subtlety is the re-splice: the block is dropped before it is rebuilt,
+so the recorded value is **carried forward** rather than re-captured — otherwise
+after one theme change the record would describe the colour this project itself
+wrote. Verified across three consecutive splices and by a full
+install → hook → uninstall cycle.

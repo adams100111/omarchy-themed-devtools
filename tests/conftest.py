@@ -99,3 +99,21 @@ def child_env(home: Path, path: str | None = None) -> dict[str, str]:
     if path is not None:
         env["PATH"] = path
     return env
+
+
+def ui_accent(text: str) -> str | None:
+    """The accent value inside [ui] only.
+
+    Asserting on the whole file is too coarse: the managed block records the
+    PRIOR accent so uninstall can restore it, so the old value legitimately
+    appears elsewhere in the file.
+    """
+    inui = False
+    for line in text.splitlines():
+        s = line.strip()
+        if s.startswith("["):
+            inui = s == "[ui]"
+            continue
+        if inui and s.startswith("accent"):
+            return s.split("=", 1)[1].strip()
+    return None

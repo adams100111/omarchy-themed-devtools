@@ -97,6 +97,33 @@ strip_block "$HOME/.config/tmux/tmux.conf" --remove-if-empty
 # It never creates that legacy file, so it is never removed when emptied.
 strip_block "$HOME/.tmux.conf"
 strip_block "$HOME/.config/bat/config" --remove-if-empty
+# herdr's [ui] accent is replaced in place, OUTSIDE the managed block, so
+# stripping the block alone would leave the theme's colour behind. splice()
+# records the prior value inside the block; read it back before the block goes.
+restore_herdr_accent() {
+  local cfg="$HOME/.config/herdr/config.toml"
+  [[ -f $cfg ]] || return 0
+  local prior
+  prior=$(sed -n 's/^# omarchy-theme:prior-ui-accent = //p' "$cfg" | head -1)
+  [[ -n $prior ]] || return 0
+
+  # Rewrite only the accent key inside [ui]; every other byte is left alone.
+  # Written through a symlink and mode-preserved, like every other writer here.
+  local real tmp
+  real=$(readlink -f "$cfg") || return 0
+  tmp=$(mktemp -p "$(dirname "$real")") || return 0
+  awk -v prior="$prior" '
+    /^[[:space:]]*\[ui\][[:space:]]*$/ { inui = 1; print; next }
+    /^[[:space:]]*\[/ { inui = 0 }
+    inui && /^[[:space:]]*accent[[:space:]]*=/ { print "accent = " prior; next }
+    { print }
+  ' "$real" > "$tmp" || { rm -f "$tmp"; return 0; }
+  chmod --reference="$real" "$tmp" 2>/dev/null || true
+  mv -f "$tmp" "$real"
+  echo "  restored herdr [ui] accent to $prior"
+}
+
+restore_herdr_accent
 strip_block "$HOME/.config/herdr/config.toml"
 echo "  removed managed blocks"
 

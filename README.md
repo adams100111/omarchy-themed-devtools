@@ -74,25 +74,16 @@ machine, so `install.sh` carries guarded wiring for a `delta.gitconfig`
 include (`command -v delta && ...`) that simply never fires here and has not
 been exercised end to end. It is not supported in v1.
 
-## Herdr's accent does not round-trip
+## Herdr's accent round-trips too
 
-Every other file this project touches restores to its original contents —
-symlinks and their `*.pre-omarchy-theme` backups, the marker blocks in
-`git/config`, `tmux.conf`, and `bat/config`, the bat theme file, the env file.
-`herdr` is the one exception. (Two things that are not file *contents* do
-remain: directories created along the way — `~/.config/bat/themes`,
-`~/.config/tmux` — are left in place when they end up empty, and `bat`'s
-rebuilt cache under `$XDG_CACHE_HOME/bat` is a derived artifact, not
-configuration.)
+`splice()` records what `[ui] accent` was before this project first touched the
+file, inside the managed block, and `uninstall.sh` restores it. The record is
+carried forward across theme changes rather than re-captured, so after any
+number of switches it still remembers the original rather than the colour this
+project wrote last time.
 
-herdr keeps a single `accent` key under `[ui]`, outside the block this
-project manages, and the theme's accent color is applied there so herdr's UI
-matches its border colors. `splice()` in `lib/herdr_patch.py` replaces that
-key **in place** — there is no record of what it was before, so `uninstall.sh`
-has nothing to restore it from. Concretely: a config with `accent = "blue"`
-before install still reads `accent = "#c2a15a"` (or whatever the last active
-theme's accent was) after `install.sh` + a theme change + `uninstall.sh`.
-If you want that value back, note it down before installing.
+If the file had no `[ui] accent` to begin with, nothing is recorded and nothing
+is restored — correct in both directions.
 
 ## Install
 
