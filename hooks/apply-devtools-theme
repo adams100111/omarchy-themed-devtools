@@ -90,6 +90,13 @@ adapter_lazygit() {
   usable lazygit lazygit.theme.yml || return 0
   log "  lazygit: theme regenerated (layered via LG_CONFIG_FILE)"
 }
+# delta reads its colours through an [include] that install.sh adds once, so
+# regenerating the file is the whole job -- the same shape as fzf and lazygit.
+adapter_delta() {
+  usable delta delta.gitconfig || return 0
+  log "  delta: theme regenerated (layered via git [include])"
+}
+
 adapter_bat() {
   usable bat Omarchy.tmTheme || return 0
 
@@ -183,7 +190,7 @@ main() {
   log "omarchy-themed-devtools: applying theme '${1:-unknown}'"
   # eza has no adapter: its value is converted where it is consumed,
   # in the env file install.sh writes. See README.
-  for adapter in starship lazygit bat fzf herdr lazydocker tmux; do
+  for adapter in starship lazygit bat fzf herdr lazydocker tmux delta; do
     "adapter_$adapter" || log "  warn $adapter: adapter returned non-zero"
   done
   return 0

@@ -115,7 +115,7 @@ Every row verified against the tool's own documentation (context7) or its binary
 | `eza` | `eza.colors` | **template only — no adapter** | `EZA_COLORS`, converted by `install.sh` | next shell |
 | `lazydocker` | `lazydocker.theme.yml` | owning | symlink | next launch |
 | `tmux` | `tmux.theme.conf` | layered | `source-file` line | `tmux source-file` |
-| ~~`delta`~~ | `delta.gitconfig` | *v1.1, not built* | `[include]` in `~/.config/git/config` | immediate |
+| `delta` | `delta.gitconfig` | layered | `[include]` in `~/.config/git/config` | immediate |
 
 `delta` is **v1.1**: it is in the user's dev-boost `cli` profile but is not
 installed on this machine (neither `delta` nor `git-delta`), so its adapter
@@ -265,3 +265,20 @@ so the recorded value is **carried forward** rather than re-captured — otherwi
 after one theme change the record would describe the colour this project itself
 wrote. Verified across three consecutive splices and by a full
 install → hook → uninstall cycle.
+
+
+## Addendum — delta is no longer deferred (2026-09-05)
+
+delta was deferred on the grounds that it is not installed on the development
+machine and so could not be tested end to end. That reasoning was wrong: every
+other adapter is tested with a fake tool on `PATH`, and delta needs nothing
+more. It is now a first-class adapter with a template, a layered `[include]`,
+and the same tests the others get.
+
+The template validation earned its place immediately — the first draft
+referenced `{{ line }}`, which is a token from the *theme's* `palette.toml`, not
+a key Omarchy's `colors.toml` resolves. It would have rendered literally into a
+git config. Replaced with `{{ mix background foreground 20% }}`.
+
+**Eight templates, eight adapters, none deferred.** Installing `git-delta`
+activates it; until then its `command -v` guard skips it, like any absent tool.

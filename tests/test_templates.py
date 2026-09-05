@@ -66,6 +66,20 @@ def test_no_unresolved_tokens(name):
     assert not leftovers, f"{name} left {leftovers} unresolved"
 
 
+def test_delta_gitconfig_is_ini_shaped():
+    """delta's file is git-config syntax: a [delta] section of key = value."""
+    out = _render_template("delta.gitconfig.tpl")
+    assert "[delta]" in out
+    body = out.split("[delta]", 1)[1]
+    for line in body.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        assert "=" in line, line
+    # syntax-theme must name the bat theme this project installs.
+    assert "syntax-theme = Omarchy" in out
+
+
 @pytest.mark.parametrize("name", ["herdr.theme.toml.tpl", "starship.toml.tpl"])
 def test_toml_templates_parse(name):
     tomllib.loads(_render_template(name))

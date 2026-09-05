@@ -252,3 +252,28 @@ def test_herdr_adapter_writes_through_a_symlink(fake_home):
     assert 'accent = "#c2a15a"' in body
     # mktemp creates 0600; the rename must not tighten the user's permissions.
     assert source.stat().st_mode & 0o777 == 0o644
+
+
+def test_delta_adapter_leaves_generated_file_alone(fake_home):
+    """delta is layered through a git [include] that install.sh adds once.
+
+    The adapter therefore has nothing to wire -- regenerating the file is the
+    whole job -- so the hook must not touch it. Tested with a fake `delta` on
+    PATH because the package is not installed on the development machine.
+    """
+    path = _fake_tool(fake_home, "delta")
+    theme = fake_home / ".local/state/omarchy/current/theme"
+    gitcfg = theme / "delta.gitconfig"
+    original = "[delta]\n    syntax-theme = Omarchy\n"
+    gitcfg.write_text(original)
+
+    assert run_hook(fake_home, "eltahir", path=path).returncode == 0
+    assert gitcfg.read_text() == original
+
+
+def test_delta_adapter_skips_when_not_installed(fake_home):
+    theme = fake_home / ".local/state/omarchy/current/theme"
+    (theme / "delta.gitconfig").write_text("[delta]\n")
+    result = run_hook(fake_home, "eltahir", "--verbose")
+    assert result.returncode == 0
+    assert "skip delta: not installed" in result.stdout
